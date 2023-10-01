@@ -2,6 +2,7 @@ import openpyxl
 from openpyxl import load_workbook
 import OFXWriter
 import re
+import os.path
 
 class ConfigurationError(Exception):
     pass
@@ -57,6 +58,7 @@ class ExcelWBWriter(OFXWriter.Writer):
     def __init__(self, plist):
         fn = plist['ExcelFile'] if 'ExcelFile' in plist else None
         try:
+            fn = os.path.expandvars(fn)
             self.wb = load_workbook(filename=fn)
         except FileNotFoundError:
             self.wb = openpyxl.Workbook()

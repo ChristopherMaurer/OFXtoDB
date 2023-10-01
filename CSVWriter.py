@@ -1,6 +1,7 @@
 import OFXWriter
 import datetime
 import re
+import os.path
 
 def FieldtoStr(field, colchar, quotechar, quoterule, ExcelStrings):
     if field == None:
@@ -37,6 +38,7 @@ def FieldtoStr(field, colchar, quotechar, quoterule, ExcelStrings):
 class CSVWriter(OFXWriter.Writer):
     def __init__(self, plist):
         self.savedir = plist['WriteToDirectory'] if 'WriteToDirectory' in plist else "."
+        self.savedir = os.path.expandvars(self.savedir)
         self.includeheader = plist['Headers'] if 'Headers' in plist else 'NO'
         self.quoterule = plist['WhenToQuote']  # SeparatorOnly (only as necessary) or AllStrings (every string value)
         self.ExcelStrings = plist['ExcelCompatibility']  # TRUE = write special formulas to keep strings as strings.
