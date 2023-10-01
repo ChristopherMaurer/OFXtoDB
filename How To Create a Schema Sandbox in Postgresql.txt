@@ -1,0 +1,51 @@
+When adding data to a Postgresql data base under program control the first step is to establish a data base session by logging in uder a particular user and password.  This causes a security vulnerability because at some point in its execution the program must know the password to set up the session and a malicious actor could obtain it no matter how well the program tries to obfuscate it.  Rather than try to hide that password, the OFXtoDB program relies on limiting the damage that a hacker can do by confining all table writes to a single schema and then confining the program's database userid to only those activities within that schema necessary to write its data there (UPDATE, INSERT and SELECT).  With these controls in place a malicious user can still use that ID to steal your financial data or fill your disk up with garbage (denial of service), but they cannot affect the rest of the data base.  Those possibilities can be further mitigated by ensuring your Postgresql instance only accepts sessions from localhost if all activity is confined to the one PC, or making a router rule to only make db connections if the IP address starts with 192.168 or 10 if you need to allow data base action across your home network.
+
+This document explains how to set up just such a "sandboxed" ID in Postgresql.  The GRANTs needed to make this work are a little tricky to get right, so this document will explain it in a step-by-step fashion.
+
+The most important part of this solution is to make all the tables be owned by the limited user, because without it the OFXtoDB program will not be able to determine the target tables' primary keys which is necessary to prevent duplicate financial records from being stored in the tables.  To do this, we will refer to 2 user IDs, 'postgres' and 'limited', where postgres is the standard superuser ID and limited will be the limited-access ID to be used by the OFXtoDB program in storing its records. In addition, we will assume the target schema to store this data will be named 'sandbox'.
+
+Step one is to create the limited user and the sandbox schema.  Log into a session with the postgres (superuser) ID.  The user ID creation is very straightforward, and you can either issue the SQL to do it or do it from the menus in PGADMIN4.  To create the sandbox schema, issue the following SQL:
+	CREATE SCHEMA sandbox;
+	GRANT USAGE, CREATE On SCHEMA sandbox to limited
+	GRANT ALL On ALL TABLES IN SCHEMA sandbox to limited
+
+The program OFXtoDB also reads descriptive information about the tables that is stored in information_schema and pg_catalog, so you may need to GRANT SELECT On ALL TABLES in those schemas as well, although I did not.  It appears those schemas come pre-made with SELECT grants to public so it might be unnecessary.
+
+The trick here is to understand the two-tier permission system in Postgresql.  Coming from Oracle, the second of the two Grants above is all you ever need to give access and new users to Postgresql don't understand how you can GRANT SELECT on a table successfully and then be prevented by permissions from SELECTing on it.  The answer is that first Postgresql checks your access to the schema and THEN checks for appropriate access to the table (it then goes on to check access to the columns, if any).  Without access to the schema, no access to the tables.  The GRANT USAGE, CREATE On SCHEMA gives both a USAGE permission which allows the user to look up tables in the schema, and a CREATE permission which allows the creation of new objects (tables, views, TYPEs, functions, etc.) in the schema.  You need both to set up the tables, but we will later REVOKE the CREATE permission when we finish locking down the userid.  We are temporarily GRANTing ALL permissions to limited, because a user under that ID/role must be the one to create the data base tables which will house the data.
+
+After designing the data base and the physical tables, primary keys, and columns [see the topic, Data Base Design Considerations] you will create the actual tables.  Log out of the postgres session and log into a limited session.  You can create the tables with SQL or with the PGADMIN4 interface.  The first important point is to create the primary keys while you are defining the data columns - the Postgres data writer in OFXtoDB reads the primary keys to understand how to de-dup records already in the data base as well as repeated records within each data feed (Separate SECLISTs for multiple accounts is a prime creator of duplicate securities).  Do not be tempted to use a sequence for the primary key! You will defeat that important de-duping capability.  The second point here is if you are going to use enums as column types, you must create the enum as a Type before CREATing the table - each enum is stored at the schema level, not at the table level.
+
+The next step is to create the OFX mapping table in this same schema and populate it with the List->table, tag->column mappings (also under the limited userid).  The OFX mapping table can be called whatever you wish (its name is designated in the OFXtoDB.ini file), but its four column names must be OFXList, DBTable, OFXTag, and DBColumn, and the mixed case is important (use double quotes around the column names).  Here you can either leave out the primary key entirely or make all 4 columns the primary key.  See the topic OFX to Data Base Mapping for details on how to code a mapping.
+
+Now you're ready to take your new data base for a test drive.  Create your OFXtoDB.ini file in the same directory as the program with the following entries (change these values to suit your customizations):
+		[common]
+		TimeZone = America/New_York
+		#  OFXFile = <.qfx file specification>
+		Writer = Postgres
+
+		[Postgres]
+		#  host=localhost
+		#  dbname=postgres
+		#  user=postgres
+		user=limited
+		password=plugh
+		schema=sandbox
+		mapping = UseDataBase
+		OFXmapping = OFX_to_Tables
+		
+See the topic OFXtoDB.ini parameters for more details on any of these.  Run the program from the command line as "PYTHON OFXtoDB [.qfx file spec]".  Either include the .qfx file on the command line or embed it in the .ini under the OFXFile parameter.  If there's something wrong, such as trying to save an alpha data field into a numeric format, the program will be pretty specific about its error.  Otherwise, the program finishes normally with some data table statistics like:
+							 Added   Updated
+							   New  Existing
+	Accounts                     0         1
+	Account_Bal_History          0         1
+	Bank_Transactions            0       144
+
+The most likely problems are misspellings of tag or column names in the mapping, and these will not produce an error.  They simply won't store the data as expected.  So, check your .qfx file carefully.  If you see data that you think you mapped but it's not getting stored in the table, check the mapping table entry for typos.
+
+Once you are satisfied that the mappings are working, it is time to lock down the permissions for limited.  Log into the postgres superuser id and issue the following DDL commands:
+	Revoke CREATE On SCHEMA "sandbox" From limited;
+	Revoke ALL On ALL TABLES IN SCHEMA "sandbox" From limited;
+	Grant SELECT, INSERT, UPDATE On ALL TABLES IN SCHEMA "sandbox" to limited;
+	Grant Delete on table "sandbox"."OFX_to_Tables"  to limited;
+
+This last Grant is a convenience to allow full data maintenance on the mapping table itself, but you can omit it and maintain it from a superuser session.
