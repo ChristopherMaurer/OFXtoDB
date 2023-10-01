@@ -1,6 +1,9 @@
 ('D:\\Users\\Chris\\Documents\\Home '
  'Finances\\OFXtoDB\\build\\OFXtoDB\\PYZ-00.pyz',
- [('ChooseWriter',
+ [('CSVWriter',
+   'D:\\Users\\Chris\\Documents\\Home Finances\\OFXtoDB\\CSVWriter.py',
+   'PYMODULE'),
+  ('ChooseWriter',
    'D:\\Users\\Chris\\Documents\\Home Finances\\OFXtoDB\\ChooseWriter.py',
    'PYMODULE'),
   ('DataDumper',
