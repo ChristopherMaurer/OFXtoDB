@@ -2,6 +2,7 @@ import openpyxl
 from openpyxl import load_workbook
 import OFXWriter
 import re
+from os import path
 
 class ConfigurationError(Exception):
     pass
@@ -56,6 +57,7 @@ def IndexAllWorksheets(MapSpecs, wb):
 class ExcelWBWriter(OFXWriter.Writer):
     def __init__(self, plist):
         fn = plist['ExcelFile'] if 'ExcelFile' in plist else None
+        fn = path.expandvars(fn)
         try:
             self.wb = load_workbook(filename=fn)
         except FileNotFoundError:
