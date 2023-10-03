@@ -1,7 +1,7 @@
 import OFXWriter
 import datetime
 import re
-import os.path
+from os import path
 
 def FieldtoStr(field, colchar, quotechar, quoterule, ExcelStrings):
     if field == None:
@@ -38,18 +38,21 @@ def FieldtoStr(field, colchar, quotechar, quoterule, ExcelStrings):
 class CSVWriter(OFXWriter.Writer):
     def __init__(self, plist):
         self.savedir = plist['WriteToDirectory'] if 'WriteToDirectory' in plist else "."
-        self.savedir = os.path.expandvars(self.savedir)
+        self.savedir = path.expandvars(self.savedir)
         self.includeheader = plist['Headers'] if 'Headers' in plist else 'NO'
         self.quoterule = plist['WhenToQuote']  # SeparatorOnly (only as necessary) or AllStrings (every string value)
         self.ExcelStrings = plist['ExcelCompatibility']  # TRUE = write special formulas to keep strings as strings.
         self.quotechar = plist['QuoteChar'][0]
         self.colchar = plist['ColumnSeparator'][0]
+        self.destination = 'CSV Files'
         super().__init__(plist)
 
     def OFXListEnd(self):
         if self.curOFXList is not None:
             for EachTable in self.curOFXList:
                 f = open("{0}/{1}.csv".format(self.savedir, EachTable),'w+')
+                if EachTable not in self.Stats:
+                    self.Stats[EachTable]=[0,0]  # Update statistics
                 if self.includeheader in ['YES', 'Y', 'TRUE', 'T', 'ENABLED']:
                     result = []
                     for hdr in self.curOFXList[EachTable][0].Cols:
@@ -62,4 +65,5 @@ class CSVWriter(OFXWriter.Writer):
                         st = FieldtoStr(field, self.colchar, self.quotechar, self.quoterule, self .ExcelStrings)
                         result.append(st)
                     f.write(self.colchar[0].join(result) + "\n")
+                    self.Stats[EachTable][0] += 1
                 f.close()
