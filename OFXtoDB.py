@@ -19,7 +19,7 @@
 #   designated in the OFXtoDB.ini file or can even reside within the OFXtoDB.ini file.  For example, the OFX->Table
 #   entry (INVSTMTRS/INVTRANLIST, Transactions) says that the list data enclosed by <INVTRANLIST> is to be mapped to the
 #   Transactions logical table (which is a physical table in the Postgres Writer or a Worksheet name in the Excel
-#   Writer [future enhancement]).  In addition, all of the data elements between <INVSTMTRS> and <INVTRANLIST> are to be
+#   Writer).  In addition, all of the data elements between <INVSTMTRS> and <INVTRANLIST> are to be
 #   provided within every record processed in the list (nearby data is added to the record context).  In this way, for
 #   example, the Account number (ACCTID tag) can be added as part of each Transactions' primary key.  The model supports
 #   multiple logical tables per OFX list, so in a Bank statement you can push summary balances to an Account table while
@@ -53,7 +53,7 @@ def AddData(subTree,globalvars,listtag):    # These two functions get a lot of t
                         parent = ""
                     local.append(XMLPairs(e.tag, e.text,
                                  "{0}/{1}".format(parent, e.tag)))
-                save.append(e.findall('*'))  # aggregate? If not, empty list will be appended and popped right off next
+                save.append(e.findall('*'))  # aggregate? If so, empty list will be appended and popped right off next
             else:
                 if e.tag == listtag:     # Known exception: In the list we wish to process, elevate DTSTART & DTEND
                     for dttag in ['DTSTART', 'DTEND']:  #  to be context variables, not separate list entries
@@ -98,7 +98,7 @@ else:
 knownlists = [e[0].upper() for e in parameters.items('OFXListUniverse')]
 FIStmt = OFXTree()       # Thanks to Chris Singley for his OFXTools.  After these two statements, file has been read in
 FIStmt.parse(OFXfile)    #   and turned into a set of xml.etree.ElementTree.Elements.  Easy to walk this tree.
-OFXGlobals.InThisFile = knownlists
+OFXGlobals.InThisFile = knownlists   # Chop down the lists to just those present in this file - save some processing later
 for i in reversed(range(len(OFXGlobals.InThisFile))):
     if not FIStmt.find(".//"+ OFXGlobals.InThisFile[i]):
         OFXGlobals.InThisFile.pop(i)
