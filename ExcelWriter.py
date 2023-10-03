@@ -23,8 +23,7 @@ def IndexAllWorksheets(MapSpecs, wb):
                 if (not hasattr(ws,"PKIndexIsReady")) and ws.max_row>1:
                     ws.PKIndexIsReady = False
                     spectuple = MapSpecs[OFX][tablename][0]
-                    for rows in ws.iter_rows(min_col=1, max_col=ws.max_column, min_row=1, max_row=1):
-                        colhdrs = rows
+                    for colhdrs in ws.iter_rows(min_col=1, max_col=ws.max_column, min_row=1, max_row=1):
                         break
                     ws.colnbrs = []
                     for OFXcol in spectuple.Cols:
