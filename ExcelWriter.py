@@ -48,12 +48,15 @@ def IndexOneWorksheet(tablename, ws, MapSpecs):
     ws.PKIndexIsReady = True
 
 
+# Notice that IndexOneWorksheet can be called either as a subroutine/function or in a separate thread, making it
+# possible to add some tuning logic here to avoid thread setup/takedown overhead when processing small sheets.
+#  Something like: "if ws.max_row < 30: <call as a function> else: <call as a thread>".
 def IndexAllWorksheets(MapSpecs, wb):
     for OFX in MapSpecs:
         for tablename in MapSpecs[OFX]:
             if tablename in wb.sheetnames:
                 ws = wb[tablename]
-                if (not hasattr(ws,"PKIndexIsReady")) and ws.max_row>1:
+                if (not hasattr(ws,"PKIndexIsReady")) and ws.max_row>0:
                     ws.PKIndexIsReady = False
                     spectuple = MapSpecs[OFX][tablename][0]
 #                    IndexOneWorksheet(tablename, ws, spectuple)  # Old invocation - called as a function, not as a thread
