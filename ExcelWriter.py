@@ -1,5 +1,6 @@
 import openpyxl
 from openpyxl import load_workbook
+from copy import copy
 import OFXWriter
 import re
 from os import path
@@ -99,12 +100,17 @@ class ExcelWBWriter(OFXWriter.Writer):
                     origmaxrow = ws.max_row
                     if hasattr(ws,"IndexThread"): ws.IndexThread.join()   # synchronize here to the parallel thread indexing this worksheet.
                     if not ws.PKIndexIsReady:   # Thread ended, but successfully or failure?
-                        raise ConfigurationError('Failed to Create Unique Index')
+                        raise ConfigurationError('Failed to Create Unique Index for worksheet {0}'.format(EachTable))
                     for datarow, thisPK in zip(self.curOFXList[EachTable][2], self.curOFXList[EachTable][3]):
                         self.__anychanges = True
                         destrow = ws.PKIndex[thisPK] if thisPK in ws.PKIndex else ws.max_row+1
                         for newvalue, destcol in zip(datarow,ws.colnbrs):
                             ws.cell(row=destrow, column=destcol).value = newvalue
+                            if destrow > origmaxrow and destrow>1:  # Carry down formatting from above on newly-created rows
+                                ws.cell(row=destrow, column=destcol).number_format\
+                                    = ws.cell(row=destrow-1, column=destcol).number_format
+                                ws.cell(row=destrow, column=destcol).font\
+                                    = copy(ws.cell(row=destrow-1, column=destcol).font)
                         if destrow > origmaxrow:
                             self.Stats[EachTable][0] += 1
                         else:
