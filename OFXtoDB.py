@@ -1,14 +1,14 @@
 #  Read a financial institution's Quicken-format file (.qfx) and produce data records that can be written to a variety
-#   of formats: currently only Postgres data base and Excel is supported.  Most of a .qfx file consists of SGML/XML data
-#   arranged according to an Open Financial eXchange protocol, or OFX.  The program is divided into three parts: this
-#   main module is responsible for producing OFX data within a logical table and record paradigm.  The OFXWriter module
-#   reads mapping specs in a very specific format, translates them into an internal data structure for efficient
-#   execution, and casts (OFXTag,Value) pairs from the main module into a designated spot in one or more output records.
-#   The subclasses of OFXWriter implement the actual writing of the records to the desired destination format.
-#   Each Writer subclass handles a different output data format by implementing as many of the event functions
+#   of formats: currently Postgres data base, Excel workbook, and .CSV files is supported.  Most of a .qfx file consists
+#   of SGML/XML data arranged according to an Open Financial eXchange protocol, or OFX.  The program is divided into
+#   three parts: this main module is responsible for producing OFX data within a logical table and record paradigm.  The
+#   OFXWriter module reads mapping specs in a very specific format, translates them into an internal data structure for
+#   efficient execution, and casts (OFXTag,Value) pairs from the main module into a designated spot in one or more
+#   output records. The subclasses of OFXWriter implement the actual writing of the records to the desired destination
+#   format. Each Writer subclass handles a different output data format by implementing as many of the event functions
 #   (__init__, OFXListStart, OFXRecStart, OFXPutData, OFXRecEnd, OFXListEnd, & OFXAllDone) through base class overrides
-#   as needed to consume and write the data, although typically they only need to override __init__() and OFXListEnd and
-#   leave the data accumulation up to the parent.
+#   as needed to consume and write the data, although typically they only need to override __init__() and OFXListEnd()
+#   and leave the data accumulation up to the base class.
 #
 # This main module is list-oriented.  That is, it can traverse any of the eight lists defined by the OFX Standard,
 #   delivering all the data within that list as well as any "nearby" data.  The consumer is responsible for defining
@@ -16,10 +16,10 @@
 #   these elements map to their output data model.  This is resident in one definition table: OFXList->Tables defines
 #   the OFX lists of interest and the physical output tables and OFXTag->Columns defines the element tags of interest
 #   and how they map to physical columns within the tables.  These are both resident in a single DB table that can be
-#   designated in the OFXtoDB.ini file or can even reside within the OFXtoDB.ini file.  For example, the OFX->Table
-#   entry (INVSTMTRS/INVTRANLIST, Transactions) says that the list data enclosed by <INVTRANLIST> is to be mapped to the
-#   Transactions logical table (which is a physical table in the Postgres Writer or a Worksheet name in the Excel
-#   Writer).  In addition, all of the data elements between <INVSTMTRS> and <INVTRANLIST> are to be
+#   designated in the OFXtoDB.ini file or can even reside within the OFXtoDB.ini file itself.  For example, the
+#   OFX->Table entry (INVSTMTRS/INVTRANLIST, Transactions) says that the list data enclosed by <INVTRANLIST> is to be
+#   mapped to the Transactions logical table (which is a physical table in the Postgres Writer or a Worksheet name in
+#   the Excel Writer).  In addition, all of the data elements between <INVSTMTRS> and <INVTRANLIST> are to be
 #   provided within every record processed in the list (nearby data is added to the record context).  In this way, for
 #   example, the Account number (ACCTID tag) can be added as part of each Transactions' primary key.  The model supports
 #   multiple logical tables per OFX list, so in a Bank statement you can push summary balances to an Account table while
@@ -100,7 +100,7 @@ FIStmt = OFXTree()       # Thanks to Chris Singley for his OFXTools.  After thes
 FIStmt.parse(OFXfile)    #   and turned into a set of xml.etree.ElementTree.Elements.  Easy to walk this tree.
 OFXGlobals.InThisFile = knownlists   # Chop down the lists to just those present in this file - save some processing later
 for i in reversed(range(len(OFXGlobals.InThisFile))):
-    if not FIStmt.find(".//"+ OFXGlobals.InThisFile[i]):
+    if FIStmt.find(".//"+ OFXGlobals.InThisFile[i]) is None:
         OFXGlobals.InThisFile.pop(i)
 XMLPairs = namedtuple("XMLPairs", "tag value alttag")
 globalvars = []
@@ -118,7 +118,7 @@ else:
 DataWriter = ChooseWriter.WhichWriter(wr,wrparams)
 for OFXList in DataWriter:  # The Writer knows which OFX lists the user is interested in & what order to process
     searchable = './/' + OFXList
-    if FIStmt.find(searchable):  # This code checks to see if there is at least one list in the file
+    if FIStmt.find(searchable) is not None:  # This code checks to see if there is at least one list in the file
         uppercontext = re.sub(r'(//?)?\w+$','',OFXList)  # Remove the bottom tag to create a 'nearby' context
         listtag = re.sub(r'^.*?(\w+)$',r'\1',OFXList)
         if uppercontext:
