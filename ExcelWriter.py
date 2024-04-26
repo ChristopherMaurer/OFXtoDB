@@ -12,7 +12,7 @@ class ConfigurationError(Exception):
 
 # This is a replacement function called by re.sub below to parse relative cell references out of an EXCEL formula and
 # replace with a cell reference to the same column and one row number greater.  This is like a Fill-Down function using
-# EXCEL.  Does not support R1C1-type references nor relative named ranges (does anyone REALLY use these?)
+# EXCEL.  Does not support relative named ranges (does anyone REALLY use these?)
 def repl(match):
     return match.group(1) + str(1 + int(match.group(2)))
 
@@ -125,7 +125,7 @@ class ExcelWBWriter(OFXWriter.Writer):
                                     = copy(ws.cell(row=destrow-1, column=destcol).font)
                         if destrow > origmaxrow:
                             for destcol in ws.FormulaCols:   # Copy-Paste the formula directly above for each new col with a formula
-                                ws.cell(row=destrow, column=destcol).value = re.sub(r"(?<!\w)([a-z]{1,3})(\d+)", repl
+                                ws.cell(row=destrow, column=destcol).value = re.sub(r"(?<!\w)([a-z]{1,3})(\d+)(?!C)", repl
                                             , ws.cell(row=destrow-1, column=destcol).value, flags=re.IGNORECASE)
                             self.Stats[EachTable][0] += 1
                         else:
