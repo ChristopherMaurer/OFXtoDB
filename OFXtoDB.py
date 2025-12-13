@@ -28,6 +28,7 @@
 #   wrappers (SECLIST,INVPOSLIST,INVTRANLIST,BANKTRANLIST,BANKTRANLISTP,LOANTRANLIST,AMRTTRANLIST,CLOSING).
 #
 import sys
+import platform
 import OFXtoDataParams
 import OFXGlobals
 import WalkElementTree
@@ -88,6 +89,7 @@ def ProcessListEntry(ListEntry:xml.etree.ElementTree.Element, WhatList):  # This
 
 #  MAIN PROGRAM STARTS HERE
 
+print ("Running Python {0}".format(platform.python_version()))
 parameters = OFXtoDataParams.readconfig(sys.argv)
 OFXGlobals.params = parameters
 OFXGlobals.TargetTZ = ZoneInfo(parameters['common']['TimeZone'])  # All timestamps will be cast to this IANA zone name.
@@ -116,6 +118,7 @@ if wr:
 else:
     wrparams=None
 DataWriter = ChooseWriter.WhichWriter(wr,wrparams)
+DataWriter.updateexisting = parameters['common']['UpdateExisting'].upper() in ('T','TRUE','Y','YES')
 for OFXList in DataWriter:  # The Writer knows which OFX lists the user is interested in & what order to process
     searchable = './/' + OFXList
     if FIStmt.find(searchable) is not None:  # This code checks to see if there is at least one list in the file
@@ -143,8 +146,8 @@ for OFXList in DataWriter:  # The Writer knows which OFX lists the user is inter
         DataWriter.OFXListEnd()
 DataWriter.OFXAllDone()
 if len(DataWriter.Stats)>0:
-    print("{0:25}{1:>10}{2:>10}".format(DataWriter.destination[0:24],'Added','Updated'))
-    print("{0:25}{1:>10}{2:>10}".format(DataWriter.destination[25:49],'New','Existing'))
+    print("{0:25}{1:>10}{2:>10}".format(DataWriter.destination[0:24],'Added','Updated' if DataWriter.updateexisting else 'Skipped'))
+    print("{0:25}{1:>10}{2:>10}".format(DataWriter.destination[24:49],'New','Existing'))
     for table,t in DataWriter.Stats.items():
         print("{0:25}{1:>10d}{2:>10d}".format(table,t[0],t[1]))
 else:

@@ -12,7 +12,10 @@ class ConfigurationError(Exception):
 
 # This is a replacement function called by re.sub below to parse relative cell references out of an EXCEL formula and
 # replace with a cell reference to the same column and one row number greater.  This is like a Fill-Down function using
-# EXCEL.  Does not support relative named ranges (does anyone REALLY use these?)
+# EXCEL.  Does not support relative named ranges (I don't think Excel supports these any more).  The re.sub that calls this only parses
+# cell references where the column reference is floating, not anchored, so repl only called when column relocation is
+# necessary.  This excludes all R#C# references because R1C1 is an absolute (anchored) reference and R[0]C5 is a floating
+# reference whose formula does not need updating in a Fill Down.
 def repl(match):
     return match.group(1) + str(1 + int(match.group(2)))
 
@@ -22,7 +25,7 @@ def repl(match):
 # key of the EXCEL record and the item is the row number of the entry in the sheet, making it a direct access to the
 # matching record.  The indexing is performed in a parallel thread, thus letting (in theory) the indexing take place at
 # the same time the main program is accumulating its data records before writing them out.  Note that multithreading
-# does not imply parallel processing in Python 3.11.  We'll need a future release of Python before two totally
+# does not imply parallel processing in Python 3.12.  We'll need a future release of Python before two totally
 # compute-bound threads can execute in parallel and we can reap some time savings.
 def IndexOneWorksheet(tablename, ws, MapSpecs):
     pvt = threading.local()
@@ -30,8 +33,9 @@ def IndexOneWorksheet(tablename, ws, MapSpecs):
         break
     ws.FormulaCols = list(range(1,ws.max_column+1))    # Keep track of columns with Excel formulas in them
     ws.colnbrs = []
-    for pvt.OFXcol in MapSpecs.Cols:
-        for pvt.wscol in pvt.colhdrs:
+
+    for pvt.OFXcol in MapSpecs.Cols:    # As we identify worksheet columns that receive data, remove them from the
+        for pvt.wscol in pvt.colhdrs:   #  possible-formulas list.
             if pvt.OFXcol == pvt.wscol.value:
                 ws.colnbrs.append(pvt.wscol.col_idx)
                 ws.FormulaCols.remove(pvt.wscol.col_idx)  # Remove every column that is stored into.  What's left is columns that might have calculations
@@ -39,12 +43,9 @@ def IndexOneWorksheet(tablename, ws, MapSpecs):
         else:
             raise ConfigurationError(
                 "Column {0} is not in spreadsheet for Table {1}".format(pvt.OFXcol, tablename))
-    for pvt.col in ws.FormulaCols:    # Check columns left (not stored into) for the existence of a formula
-        pvt.wscol = ws.cell(ws.max_row, pvt.col)
-        if pvt.wscol.value is None or pvt.wscol.value[0]!="=" or ws.max_row<=1:  # ws has data + last value starts with "="
-            ws.FormulaCols.remove(pvt.col)
+
     pvt.pkcolnbrs = []
-    for pvt.PKItem in MapSpecs.PKCols:
+    for pvt.PKItem in MapSpecs.PKCols:  # Build a list of column numbers that sequence the primary key for this sheet
         for pvt.wscol in pvt.colhdrs:
             if pvt.PKItem == pvt.wscol.value:
                 pvt.pkcolnbrs.append(pvt.wscol.col_idx - 1)
@@ -52,12 +53,30 @@ def IndexOneWorksheet(tablename, ws, MapSpecs):
         else:
             raise ConfigurationError(
                 "PK Column {0} is not in spreadsheet for Table {1}".format(pvt.PKItem, tablename))
-    ws.PKIndex = {}
+
+    ws.PKIndex = {}     # Build the dictionary of primary keys in this sheet.  This is our row-index.
+    pvt.BlankRanges = [ ] # Also, collect allBlank ranges for efficient deletion
     pvt.rownum = 2
-    for pvt.row in ws.iter_rows(min_col=1, max_col=ws.max_column, min_row=pvt.rownum, max_row=ws.max_row):
-        pvt.PK = tuple(pvt.row[i].value for i in pvt.pkcolnbrs)
-        ws.PKIndex[pvt.PK] = pvt.rownum
-        pvt.rownum += 1
+    for pvt.row in ws.iter_rows(min_col=1, max_col=ws.max_column, min_row=2, max_row=ws.max_row):
+         pvt.rownow = pvt.row[0].row
+         if any(tuple(k.value is not None for k in pvt.row)):
+            pvt.PK = tuple(pvt.row[i].value for i in pvt.pkcolnbrs)
+            ws.PKIndex[pvt.PK] = pvt.rownum
+            pvt.rownum += 1
+         else:    # An all-blank row in table causes havoc. Assemble the ranges & Delete it.
+                  #  (a delete key pressed in spreadsheet clears data without reclaiming space)
+            if (not pvt.BlankRanges) or ((pvt.rownow - 1) != pvt.BlankRanges[-1][1]):
+                pvt.BlankRanges.append([pvt.rownow,pvt.rownow])
+            else:
+                pvt.BlankRanges[-1][1] += 1
+
+    for pvt.rng in pvt.BlankRanges[::-1]:   # delete in reverse order to keep integrity of earlier row numbers
+        ws.delete_rows(pvt.rng[0], pvt.rng[1] - pvt.rng[0] + 1)
+
+    for pvt.col in ws.FormulaCols:    # Check columns left (not stored into) for the existence of a formula
+        pvt.wscol = ws.cell(ws.max_row, pvt.col)
+        if pvt.wscol.value is None or pvt.wscol.value[0]!="=" or ws.max_row<=1:  # ws has data + last value starts with "="
+            ws.FormulaCols.remove(pvt.col)
     ws.PKIndexIsReady = True
 
 
@@ -116,17 +135,19 @@ class ExcelWBWriter(OFXWriter.Writer):
                     for datarow, thisPK in zip(self.curOFXList[EachTable][2], self.curOFXList[EachTable][3]):
                         self.__anychanges = True
                         destrow = ws.PKIndex[thisPK] if thisPK in ws.PKIndex else ws.max_row+1
-                        for newvalue, destcol in zip(datarow,ws.colnbrs):
-                            ws.cell(row=destrow, column=destcol).value = newvalue
-                            if destrow > origmaxrow and destrow>1:  # Carry down formatting from above on newly-created rows
-                                ws.cell(row=destrow, column=destcol).number_format\
-                                    = ws.cell(row=destrow-1, column=destcol).number_format
-                                ws.cell(row=destrow, column=destcol).font\
-                                    = copy(ws.cell(row=destrow-1, column=destcol).font)
+                        if destrow > origmaxrow or self.updateexisting:
+                            for newvalue, destcol in zip(datarow,ws.colnbrs):
+                                ws.cell(row=destrow, column=destcol).value = newvalue
+                                if destrow > origmaxrow and destrow>1:  # Carry down formatting from above on newly-created rows
+                                    ws.cell(row=destrow, column=destcol).number_format\
+                                        = ws.cell(row=destrow-1, column=destcol).number_format
+                                    ws.cell(row=destrow, column=destcol).font\
+                                        = copy(ws.cell(row=destrow-1, column=destcol).font)
                         if destrow > origmaxrow:
                             for destcol in ws.FormulaCols:   # Copy-Paste the formula directly above for each new col with a formula
-                                ws.cell(row=destrow, column=destcol).value = re.sub(r"(?<!\w)([a-z]{1,3})(\d+)(?!C)", repl
-                                            , ws.cell(row=destrow-1, column=destcol).value, flags=re.IGNORECASE)
+                                ws.cell(row=destrow, column=destcol).value = re.sub(r"(?<!\w)([a-z]{1,3})(\d+)(?!C)",
+                                            lambda match: match.group(1) + str(1 + int(match.group(2))),
+                                            ws.cell(row=destrow-1, column=destcol).value, flags=re.IGNORECASE)
                             self.Stats[EachTable][0] += 1
                         else:
                             self.Stats[EachTable][1] += 1

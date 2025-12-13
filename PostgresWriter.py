@@ -1,6 +1,5 @@
 import OFXWriter
-import psycopg2
-import psycopg2.extras
+import psycopg
 
 
 class PostgresDBWriter(OFXWriter.Writer):
@@ -13,10 +12,10 @@ class PostgresDBWriter(OFXWriter.Writer):
         self.__schema = plist['schema'] if 'schema' in plist else None
         mappingsource = plist['mapping'] if 'mapping' in plist else None
         mappingtable = plist['OFXmapping'] if 'OFXmapping' in plist else None
-        self.DBSession = psycopg2.connect(host=phost, port=pport, dbname=pdbname, user=puser, password=ppwd)
+        self.DBSession = psycopg.connect(host=phost, port=pport, dbname=pdbname, user=puser, password=ppwd)
         curs = self.DBSession.cursor()
         curs.execute("select version()")
-        self.destination = curs.fetchone()[0].split(",")[0]
+        self.destination = curs.fetchone()[0].split(" on ")[0]
         curs.close()
 
 # I recommend not using this UseIniFile option for Postgres.  The table specs would then be resident both in the data
@@ -34,14 +33,15 @@ class PostgresDBWriter(OFXWriter.Writer):
 #   Now that an entire OFX list is complete, do a 2-step write to the DB.  First, write it all to an identical TEMP
 #     table in the DB. Then execute a MERGE to not duplicate any common keys.  I was on the fence as to whether to
 #     delete from DTSTART to DTEND first, in case intervening corrections have removed items at the F.I.  But ultimately
-#     I did not do it.
+#     I did not do it.  UpdateExisting is an option to overwrite duplicated records as per the primary keys.
     def OFXListEnd(self):
         if self.curOFXList is not None:
             for EachTable in self.curOFXList:
                 datatuple = self.curOFXList[EachTable][0]
-                TempTblCreate = 'Create Temp Table "{table}_Hold" (LIKE "{schema}"."{table}")'.format(table=EachTable,schema=self.__schema)
-                TempTblInsert = 'Insert Into "{table}_Hold" ({cols}) VALUES %s'.format(table=EachTable,
-                                                    cols=",".join(['"{0}"'.format(i) for i in datatuple.Cols]))
+                TempTblCreate = 'Create Temp Table "{table}_Hold" (LIKE "{schema}"."{table}" Including All)'.format(table=EachTable,schema=self.__schema)
+                TempTblInsert = 'Insert Into "{table}_Hold" ({cols}) VALUES ({plchldr})'.format(table=EachTable,
+                                                    cols=",".join(['"{0}"'.format(i) for i in datatuple.Cols]),
+                                                 plchldr=",".join(['%s' for i in datatuple.Cols]))
 # interpose a Select to distinguish Updates from Inserts in the following Merge to give better statistics
                 if len(datatuple.PKCols) > 0:
                     QryMatches = 'Select count(*) From "{table}_Hold" t Inner Join "{schema}"."{table}" M'.format(table=EachTable,schema=self.__schema)
@@ -54,12 +54,13 @@ class PostgresDBWriter(OFXWriter.Writer):
 #   produce duplicate transaction records.
                 PermMerge = 'Merge Into "{schema}"."{table}" M Using "{table}_Hold" t'.format(table=EachTable,schema=self.__schema)
                 PermMerge += " ON " + " AND ".join(['M."{pk}"=t."{pk}"'.format(pk=i) for i in datatuple.PKCols])
-                PermMerge += ' When Matched Then Update Set '
-                connector = ''
-                for tbCols in datatuple.Cols:
-                    if tbCols not in datatuple.PKCols:
-                        PermMerge += connector + '"{0}"=t."{0}"'.format(tbCols)
-                        connector = ', '
+                if self.updateexisting:
+                    PermMerge += ' When Matched Then Update Set '
+                    connector = ''
+                    for tbCols in datatuple.Cols:
+                        if tbCols not in datatuple.PKCols:
+                            PermMerge += connector + '"{0}"=t."{0}"'.format(tbCols)
+                            connector = ', '
                 PermMerge += ' When Not Matched Then Insert ({cols}) Values '.format(
                     cols=",".join(['"{0}"'.format(i) for i in datatuple.Cols]))
                 PermMerge += '(' + ', '.join(['t."{col}"'.format(col=i) for i in datatuple.Cols]) + ')'
@@ -68,8 +69,8 @@ class PostgresDBWriter(OFXWriter.Writer):
 #   Get a cursor to execute the SQL steps
                 curs = self.DBSession.cursor()
                 curs.execute(TempTblCreate)
-                # execute_values is happiest with the records in a list of tuples, that's why they were saved that way.
-                psycopg2.extras.execute_values(curs,TempTblInsert,self.curOFXList[EachTable][2])
+                # executemany needs records in a list of tuples, that's why they were saved that way.
+                curs.executemany(TempTblInsert,self.curOFXList[EachTable][2])
                 curs.execute(QryMatches)
                 NbrUpdates = curs.fetchone()
                 curs.execute(PermMerge)
@@ -79,7 +80,7 @@ class PostgresDBWriter(OFXWriter.Writer):
                 curs.close()
                 if EachTable not in self.Stats:
                     self.Stats[EachTable]=[0,0]  # Update statistics
-                self.Stats[EachTable][0] += NbrTotal-NbrUpdates[0]
+                self.Stats[EachTable][0] += NbrTotal-(NbrUpdates[0] if self.updateexisting else 0)
                 self.Stats[EachTable][1] += NbrUpdates[0]
 
 #   Finish up by closing out the DB session & releasing server resources
@@ -96,7 +97,7 @@ class MappingFromDB(OFXWriter.MappingFromIniFile):
         self.maptable = maptable
 
     def __iter__(self):
-        self.curs = self.session.cursor(cursor_factory=psycopg2.extras.NamedTupleCursor)
+        self.curs = self.session.cursor(row_factory=psycopg.rows.namedtuple_row)
         self.curs.execute('''With Recursive dependencies AS (
         	Select table_schema,table_name, 0 as dependency_level, table_schema as foreign_schema,table_name as foreign_name, ot."OFXList" as ofxgroup
         	from information_schema.tables it Inner Join (Select Distinct "DBTable", "OFXList" From "{0}"."{1}") ot on it.table_name=ot."DBTable"

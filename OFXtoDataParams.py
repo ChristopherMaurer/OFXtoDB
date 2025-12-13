@@ -12,6 +12,7 @@ def readconfig(argv):
     [common]
     TimeZone = America/New_York
     Writer = Postgres
+    UpdateExisting = False
     
     [Postgres]
     host=localhost
@@ -54,7 +55,7 @@ def readconfig(argv):
     try:
         f = open('./OFXtoData.ini', 'r')
     except OSError:
-        if platform.system()=="Windows": f = open(os.path.expandvars("%APPDATA%\OFXtoDB\OFXtoDB.ini"), 'r')
+        if platform.system()=="Windows": f = open(os.path.expandvars("%APPDATA%/OFXtoDB/OFXtoDB.ini"), 'r')
     cf.read_file(f, 'ExternalFile')
     f.close()
     cf.read_string(NoOverride, 'internals')
